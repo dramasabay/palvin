@@ -1,1 +1,28 @@
-Nothing needs to be added to .gitignore since the changes only include SQL and PHP source files (.sql, .php) which are not build artifacts, dependencies, or temporary files.
+```
+# SQL and PHP related build artifacts
+*.sql
+*.php~
+
+# Logs and temp files
+*.log
+*.tmp
+*.swp
+
+# Environment
+.env
+.env.local
+.env.*
+
+# Editors
+.vscode/
+.idea/
+
+# Dependencies
+node_modules/
+vendor/
+composer.lock
+
+# Build directories
+dist/
+build/
+```
