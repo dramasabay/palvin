@@ -306,7 +306,22 @@ $overrideText = trim($overrideText);
         <h3 class="font-semibold text-slate-800 border-b border-slate-100 pb-3">⚙ Business Rules</h3>
         <div class="grid sm:grid-cols-2 gap-4">
             <?php si('default_consignor_commission', t('commission_rate'), 'number') ?>
-            <?php si('fixed_discount_price', 'Fixed Retail Discount Preset ($)', 'number', '0') ?>
+            <div>
+                <label class="block text-sm font-medium text-slate-600 mb-1.5">Fixed Consignment Discount Preset Type</label>
+                <select name="fixed_consignment_discount_type" class="pvn-input pvn-select">
+                    <option value="amount" <?= setting($pdo,'fixed_consignment_discount_type','amount')==='amount' ? 'selected' : '' ?>>Amount ($)</option>
+                    <option value="percent" <?= setting($pdo,'fixed_consignment_discount_type','amount')==='percent' ? 'selected' : '' ?>>Percent (%)</option>
+                </select>
+            </div>
+            <?php si('fixed_consignment_discount_value', 'Fixed Consignment Discount Preset Value', 'number', '0') ?>
+            <div>
+                <label class="block text-sm font-medium text-slate-600 mb-1.5">Fixed Retail Discount Preset Type</label>
+                <select name="fixed_retail_discount_type" class="pvn-input pvn-select">
+                    <option value="amount" <?= setting($pdo,'fixed_retail_discount_type','amount')==='amount' ? 'selected' : '' ?>>Amount ($)</option>
+                    <option value="percent" <?= setting($pdo,'fixed_retail_discount_type','amount')==='percent' ? 'selected' : '' ?>>Percent (%)</option>
+                </select>
+            </div>
+            <?php si('fixed_discount_price', 'Fixed Retail Discount Preset Value', 'number', '0') ?>
             <div>
                 <label class="block text-sm font-medium text-slate-600 mb-1.5">Monthly Claim Alert Mode</label>
                 <select name="claim_alert_mode" class="pvn-input pvn-select">
