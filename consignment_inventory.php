@@ -52,6 +52,8 @@ if (is_post() && post_action() === 'sell') {
                     COALESCE(NULLIF(ca.delivery_no,''), CONCAT('DO-',ca.id))  AS delivery_no,
                     ca.assigned_stock,
                     ca.sale_price,
+                    ca.discount_type,
+                    ca.discount_amount,
                     ca.commission_rate,
                     c.store_name                                               AS consignor_name,
                     COALESCE(c.branch_location,'')                            AS branch_location,
@@ -89,19 +91,32 @@ if (is_post() && post_action() === 'sell') {
             if ($inventoryId <= 0) {
                 $pdo->prepare('INSERT INTO consignment_inventory
                     (assignment_id, consignor_id, main_inventory_id, item_name, reference_code,
-                     item_code, stock_balance, sale_price, commission_rate, image_path, updated_at)
-                    VALUES (?,?,?,?,?,?,?,?,?,NULL,NOW())')
+                     item_code, stock_balance, sale_price, discount_type, discount_amount, commission_rate, image_path, updated_at)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,NULL,NOW())')
                 ->execute([
                     $row['assignment_id'], $row['consignor_id'], $row['main_inventory_id'],
                     $row['item_name'], $row['reference_code'], $row['item_code'],
-                    $remaining, $row['sale_price'], $row['commission_rate'],
+                    $remaining, $row['sale_price'], $row['discount_type'] ?? 'amount', $row['discount_amount'] ?? 0, $row['commission_rate'],
                 ]);
                 $inventoryId = (int)$pdo->lastInsertId();
             }
 
             $opening          = $remaining;
             $closing          = $remaining - $qty;
-            $gross            = $qty * (float)$row['sale_price'];
+            
+            // Calculate net price based on discount type
+            $discountType = $row['discount_type'] ?? 'amount';
+            $discountAmount = (float)($row['discount_amount'] ?? 0);
+            $salePrice = (float)$row['sale_price'];
+            
+            if ($discountType === 'percent') {
+                $netPrice = $salePrice * (1 - $discountAmount / 100);
+            } else {
+                $netPrice = $salePrice - $discountAmount;
+            }
+            $netPrice = max(0, $netPrice); // Ensure non-negative
+            
+            $gross            = $qty * $netPrice;
             $rate             = (float)$row['commission_rate'];
             $commissionAmount = round($gross * $rate / 100, 2);
             $payout           = round($gross - $commissionAmount, 2);
@@ -111,13 +126,13 @@ if (is_post() && post_action() === 'sell') {
 
             $pdo->prepare('INSERT INTO consignment_sales
                 (inventory_id, assignment_id, consignor_id, invoice_no, item_name, quantity,
-                 unit_price, gross_amount, commission_rate, commission_amount, payout_due,
+                 unit_price, discount_type, discount_amount, gross_amount, commission_rate, commission_amount, payout_due,
                  opening_stock, closing_stock, sold_at)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,NOW())')
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NOW())')
             ->execute([
                 $inventoryId, $row['assignment_id'], $row['consignor_id'],
                 $invoiceNo, $row['item_name'], $qty,
-                $row['sale_price'], $gross, $rate, $commissionAmount, $payout,
+                $salePrice, $discountType, $discountAmount, $gross, $rate, $commissionAmount, $payout,
                 $opening, $closing,
             ]);
 
@@ -131,9 +146,13 @@ if (is_post() && post_action() === 'sell') {
             $soldLines[] = [
                 'item_name' => (string)$row['item_name'],
                 'quantity' => $qty,
-                'unit_price' => (float)$row['sale_price'],
+                'unit_price' => $salePrice,
+                'discount_type' => $discountType,
+                'discount_amount' => $discountAmount,
+                'net_price' => $netPrice,
                 'gross_amount' => $gross,
                 'commission_rate' => $rate,
+                'commission_amount' => $commissionAmount,
                 'payout_due' => $payout,
                 'delivery_no' => (string)$row['delivery_no'],
             ];
@@ -170,10 +189,17 @@ if (is_post() && post_action() === 'sell') {
             $lines[] = 'Gross Sales: ' . money($grossTotal);
             $lines[] = 'Commission: ' . money($commissionTotal);
             $lines[] = 'Payout Due: ' . money($payoutTotal);
+            $lines[] = 'Total with Commission: ' . money($grossTotal + $commissionTotal);
             $lines[] = 'Sold By: ' . (auth_user()['full_name'] ?? 'System');
             $lines[] = 'Items:';
             foreach ($soldLines as $line) {
-                $lines[] = '- ' . $line['item_name'] . ' x' . $line['quantity'] . ' @ ' . money($line['unit_price']) . ' = ' . money($line['gross_amount']) . ' | payout ' . money($line['payout_due']);
+                $discountDisplay = '';
+                if ($line['discount_amount'] > 0) {
+                    $discountDisplay = $line['discount_type'] === 'percent' 
+                        ? ' | Discount: ' . $line['discount_amount'] . '%' 
+                        : ' | Discount: ' . money($line['discount_amount']);
+                }
+                $lines[] = '- ' . $line['item_name'] . ' x' . $line['quantity'] . ' @ ' . money($line['unit_price']) . $discountDisplay . ' = ' . money($line['gross_amount']) . ' | commission ' . money($line['commission_amount']) . ' | payout ' . money($line['payout_due']);
             }
             $telegramResult = send_telegram_message($pdo, telegram_message_from_lines($lines));
             if (!$telegramResult['ok']) {
