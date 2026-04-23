@@ -36,6 +36,7 @@ if (is_post()) {
         $deliveryNo = trim((string)($_POST['delivery_no'] ?? ''));
         $qty = max(0, (int)($_POST['assigned_stock'] ?? 0));
         $salePrice = (float)($_POST['sale_price'] ?? 0);
+        $discountType = trim((string)($_POST['discount_type'] ?? 'amount'));
         $discountAmount = (float)($_POST['discount_amount'] ?? 0);
         $commissionRate = (float)($_POST['commission_rate'] ?? 0);
         $note = trim((string)($_POST['notes'] ?? ''));
@@ -63,8 +64,8 @@ if (is_post()) {
         $remaining = $qty - $soldQty;
         $pdo->beginTransaction();
         try {
-            $pdo->prepare('UPDATE consignment_assignments SET delivery_no=?, assigned_stock=?, sale_price=?, discount_amount=?, commission_rate=?, notes=?, updated_at=NOW() WHERE id=?')->execute([$deliveryNo, $qty, $salePrice, $discountAmount, $commissionRate, $note, $assignmentId]);
-            $pdo->prepare('UPDATE consignment_inventory SET stock_balance=?, sale_price=?, discount_amount=?, commission_rate=?, updated_at=NOW() WHERE assignment_id=?')->execute([$remaining, $salePrice, $discountAmount, $commissionRate, $assignmentId]);
+            $pdo->prepare('UPDATE consignment_assignments SET delivery_no=?, assigned_stock=?, sale_price=?, discount_type=?, discount_amount=?, commission_rate=?, notes=?, updated_at=NOW() WHERE id=?')->execute([$deliveryNo, $qty, $salePrice, $discountType, $discountAmount, $commissionRate, $note, $assignmentId]);
+            $pdo->prepare('UPDATE consignment_inventory SET stock_balance=?, sale_price=?, discount_type=?, discount_amount=?, commission_rate=?, updated_at=NOW() WHERE assignment_id=?')->execute([$remaining, $salePrice, $discountType, $discountAmount, $commissionRate, $assignmentId]);
             $pdo->commit();
             flash('success', 'Delivery note line updated.');
         } catch (Throwable $e) {
@@ -78,6 +79,7 @@ if (is_post()) {
     $mainIds = $_POST['main_inventory_id'] ?? [];
     $qtys = $_POST['assigned_stock'] ?? [];
     $prices = $_POST['sale_price'] ?? [];
+    $discountTypes = $_POST['discount_type'] ?? [];
     $discounts = $_POST['discount_amount'] ?? [];
     $rates = $_POST['commission_rate'] ?? [];
     $notes = $_POST['notes'] ?? [];
@@ -92,15 +94,16 @@ if (is_post()) {
             $qty = max(0, (int)($qtys[$i] ?? 0));
             if ($mainId <= 0 || $qty <= 0) continue;
             $salePrice = (float)($prices[$i] ?? 0);
+            $discountType = trim((string)($discountTypes[$i] ?? 'amount'));
             $discountAmount = (float)($discounts[$i] ?? 0);
             $commissionRate = (float)($rates[$i] ?? 0);
             $note = trim((string)($notes[$i] ?? ''));
             $main = db_one($pdo, 'SELECT mi.*, GREATEST(mi.total_stock - COALESCE((SELECT SUM(ca.assigned_stock) FROM consignment_assignments ca WHERE ca.main_inventory_id = mi.id),0),0) available_to_assign FROM consignment_main_inventory mi WHERE mi.id=?', [$mainId]);
             if (!$main) throw new RuntimeException('A selected stock item was not found.');
             if ($qty > (int)$main['available_to_assign']) throw new RuntimeException($main['item_name'] . ' only has ' . (int)$main['available_to_assign'] . ' available to issue.');
-            $pdo->prepare('INSERT INTO consignment_assignments (consignor_id, main_inventory_id, delivery_no, assigned_stock, sale_price, discount_amount, commission_rate, notes, issued_by, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())')->execute([$consignorId, $mainId, $deliveryNo, $qty, $salePrice, $discountAmount, $commissionRate, $note, auth_user()['full_name'] ?? '']);
+            $pdo->prepare('INSERT INTO consignment_assignments (consignor_id, main_inventory_id, delivery_no, assigned_stock, sale_price, discount_type, discount_amount, commission_rate, notes, issued_by, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())')->execute([$consignorId, $mainId, $deliveryNo, $qty, $salePrice, $discountType, $discountAmount, $commissionRate, $note, auth_user()['full_name'] ?? '']);
             $assignmentId = (int)$pdo->lastInsertId();
-            $pdo->prepare('INSERT INTO consignment_inventory (assignment_id, consignor_id, main_inventory_id, item_name, reference_code, item_code, stock_balance, sale_price, discount_amount, commission_rate, image_path, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())')->execute([$assignmentId, $consignorId, $mainId, $main['item_name'], $main['reference_code'], $main['item_code'], $qty, $salePrice, $discountAmount, $commissionRate, $main['image_path']]);
+            $pdo->prepare('INSERT INTO consignment_inventory (assignment_id, consignor_id, main_inventory_id, item_name, reference_code, item_code, stock_balance, sale_price, discount_type, discount_amount, commission_rate, image_path, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())')->execute([$assignmentId, $consignorId, $mainId, $main['item_name'], $main['reference_code'], $main['item_code'], $qty, $salePrice, $discountType, $discountAmount, $commissionRate, $main['image_path']]);
             $saved++;
         }
         if ($saved < 1) throw new RuntimeException('Please add at least one stock line.');
@@ -147,15 +150,22 @@ require __DIR__ . '/includes/header.php';
             </div>
             <a href="consignment_assign.php" class="pvn-btn pvn-btn-secondary pvn-btn-sm">Close</a>
         </div>
-        <form method="post" class="grid md:grid-cols-5 gap-3">
+        <form method="post" class="grid md:grid-cols-6 gap-3">
             <input type="hidden" name="action" value="update_do">
             <input type="hidden" name="assignment_id" value="<?= (int)$editRow['id'] ?>">
             <div><label class="text-xs text-neutral-500">DO No</label><input name="delivery_no" class="mt-1 w-full rounded-xl border px-3 py-2" value="<?= e($editRow['delivery_no']) ?>" required></div>
             <div><label class="text-xs text-neutral-500">Qty</label><input type="number" name="assigned_stock" min="<?= (int)$editRow['sold_qty'] ?>" class="mt-1 w-full rounded-xl border px-3 py-2" value="<?= (int)$editRow['assigned_stock'] ?>" required></div>
             <div><label class="text-xs text-neutral-500">Sale price</label><input type="number" step="0.01" name="sale_price" class="mt-1 w-full rounded-xl border px-3 py-2" value="<?= e((string)$editRow['sale_price']) ?>" required></div>
+            <div><label class="text-xs text-neutral-500">Discount Type</label>
+                <select name="discount_type" class="mt-1 w-full rounded-xl border px-3 py-2">
+                    <option value="amount" <?= (($editRow['discount_type'] ?? 'amount') === 'amount') ? 'selected' : '' ?>>Amount</option>
+                    <option value="percent" <?= (($editRow['discount_type'] ?? 'amount') === 'percent') ? 'selected' : '' ?>>Percent</option>
+                </select>
+            </div>
+            <div><label class="text-xs text-neutral-500">Discount</label><input type="number" step="0.01" name="discount_amount" class="mt-1 w-full rounded-xl border px-3 py-2" value="<?= e((string)($editRow['discount_amount'] ?? 0)) ?>"></div>
             <div><label class="text-xs text-neutral-500">Commission %</label><input type="number" step="0.01" name="commission_rate" class="mt-1 w-full rounded-xl border px-3 py-2" value="<?= e((string)$editRow['commission_rate']) ?>" required></div>
             <div><label class="text-xs text-neutral-500">Note</label><input name="notes" class="mt-1 w-full rounded-xl border px-3 py-2" value="<?= e((string)$editRow['notes']) ?>"></div>
-            <div class="md:col-span-5 flex justify-end"><button class="rounded-2xl bg-amber-500 px-4 py-3 text-white font-semibold">Update DO</button></div>
+            <div class="md:col-span-6 flex justify-end"><button class="rounded-2xl bg-amber-500 px-4 py-3 text-white font-semibold">Update DO</button></div>
         </form>
     </div>
     <?php endif; ?>
@@ -198,13 +208,14 @@ require __DIR__ . '/includes/header.php';
                             data-code="<?= e($m['item_code']) ?>" 
                             data-avail="<?= (int)$m['available_to_assign'] ?>" 
                             data-price="<?= e((string)$m['sale_price']) ?>" 
+                            data-discount-type="<?= e($m['discount_type'] ?? 'amount') ?>"
                             data-discount="<?= e((string)($m['discount_amount'] ?? 0)) ?>" 
                             data-rate="<?= e((string)setting($pdo,'default_consignor_commission','5')) ?>">
                             <div class="font-medium"><?= e($m['item_name']) ?></div>
                             <div class="text-xs text-neutral-500 mt-1"><?= e($m['item_code']) ?> · avail <?= e((string)$m['available_to_assign']) ?></div>
                             <div class="mt-3 text-sm font-semibold"><?= e(money($m['sale_price'])) ?></div>
                             <?php if (!empty($m['discount_amount'])): ?>
-                            <div class="text-xs text-emerald-600 font-medium">Discount: <?= e(money($m['discount_amount'])) ?></div>
+                            <div class="text-xs text-emerald-600 font-medium">Discount: <?= e($m['discount_type'] === 'percent' ? $m['discount_amount'].'%' : money($m['discount_amount'])) ?></div>
                             <?php endif; ?>
                         </button>
                     <?php endforeach; ?>
@@ -234,6 +245,12 @@ require __DIR__ . '/includes/header.php';
         <div class="grid grid-cols-2 gap-3">
             <div><label class="text-xs text-neutral-500">Qty</label><input type="number" name="assigned_stock[]" min="1" class="mt-1 w-full rounded-xl border px-3 py-2 item-qty" required></div>
             <div><label class="text-xs text-neutral-500">Sale price</label><input type="number" step="0.01" name="sale_price[]" class="mt-1 w-full rounded-xl border px-3 py-2 item-price" required></div>
+            <div><label class="text-xs text-neutral-500">Discount Type</label>
+                <select name="discount_type[]" class="mt-1 w-full rounded-xl border px-3 py-2 item-discount-type">
+                    <option value="amount">Amount</option>
+                    <option value="percent">Percent</option>
+                </select>
+            </div>
             <div><label class="text-xs text-neutral-500">Discount</label><input type="number" step="0.01" name="discount_amount[]" class="mt-1 w-full rounded-xl border px-3 py-2 item-discount" value="0"></div>
             <div><label class="text-xs text-neutral-500">Commission %</label><input type="number" step="0.01" name="commission_rate[]" class="mt-1 w-full rounded-xl border px-3 py-2 item-rate" required></div>
             <div><label class="text-xs text-neutral-500">Note</label><input type="text" name="notes[]" class="mt-1 w-full rounded-xl border px-3 py-2"></div>
@@ -264,6 +281,7 @@ document.querySelectorAll('.add-stock-card').forEach((btn) => btn.addEventListen
     clone.querySelector('.item-qty').value = 1;
     clone.querySelector('.item-qty').max = btn.dataset.avail;
     clone.querySelector('.item-price').value = btn.dataset.price;
+    clone.querySelector('.item-discount-type').value = btn.dataset.discountType || 'amount';
     clone.querySelector('.item-discount').value = btn.dataset.discount || 0;
     clone.querySelector('.item-rate').value = btn.dataset.rate;
     clone.querySelector('.remove-cart').addEventListener('click', () => clone.remove());
