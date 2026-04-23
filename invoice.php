@@ -169,28 +169,54 @@ if ($type === 'delivery_note') {
                 <th class="text-slate-500 font-semibold text-xs uppercase">Code</th>
                 <th class="text-right text-slate-500 font-semibold text-xs uppercase">Qty</th>
                 <th class="text-right text-slate-500 font-semibold text-xs uppercase">Sale Price</th>
+                <th class="text-right text-slate-500 font-semibold text-xs uppercase">Discount</th>
+                <th class="text-right text-slate-500 font-semibold text-xs uppercase">Net Price</th>
+                <th class="text-right text-slate-500 font-semibold text-xs uppercase">Total</th>
+                <th class="text-right text-slate-500 font-semibold text-xs uppercase">Comm%</th>
                 <th class="text-right text-slate-500 font-semibold text-xs uppercase">Commission</th>
+                <th class="text-right text-slate-500 font-semibold text-xs uppercase">Total+Comm</th>
             </tr>
         </thead>
         <tbody>
-            <?php foreach ($rows as $row): ?>
+            <?php 
+            $doTotalGross = 0;
+            $doTotalComm = 0;
+            $doTotalWithComm = 0;
+            foreach ($rows as $row): 
+                $discount = (float)($row['discount_amount'] ?? 0);
+                $netPrice = (float)$row['sale_price'] - $discount;
+                $gross = (float)$row['assigned_stock'] * $netPrice;
+                $comm = round($gross * (float)$row['commission_rate'] / 100, 2);
+                $totalWithComm = $gross + $comm;
+                $doTotalGross += $gross;
+                $doTotalComm += $comm;
+                $doTotalWithComm += $totalWithComm;
+            ?>
             <tr class="border-b border-slate-100">
                 <td class="py-3 text-slate-800"><?= e($row['item_name']) ?></td>
                 <td class="text-slate-600"><?= e($row['reference_code']) ?></td>
                 <td class="text-slate-600"><?= e($row['item_code']) ?></td>
                 <td class="text-right text-slate-600"><?= e((string)$row['assigned_stock']) ?></td>
                 <td class="text-right text-slate-600"><?= e(money($row['sale_price'])) ?></td>
+                <td class="text-right text-red-600"><?= e(money($discount)) ?></td>
+                <td class="text-right text-slate-600"><?= e(money($netPrice)) ?></td>
+                <td class="text-right font-medium text-slate-800"><?= e(money($gross)) ?></td>
                 <td class="text-right text-slate-600"><?= e((string)$row['commission_rate']) ?>%</td>
+                <td class="text-right text-slate-600"><?= e(money($comm)) ?></td>
+                <td class="text-right font-bold text-emerald-700"><?= e(money($totalWithComm)) ?></td>
             </tr>
             <?php endforeach; ?>
         </tbody>
     </table>
     <div class="flex justify-between items-end gap-8">
         <div class="text-sm text-slate-500"><?= nl2br(e(implode("\n", array_filter(array_map(fn($r) => $r['notes'], $rows))))) ?></div>
-        <div class="w-52 space-y-2 text-sm">
+        <div class="w-64 space-y-2 text-sm">
             <div class="flex justify-between text-slate-500"><span>Total Lines</span><span><?= e((string)count($rows)) ?></span></div>
-            <div class="flex justify-between font-bold text-slate-800 border-t-2 border-slate-200 pt-2 mt-2">
-                <span>Total Qty</span><span><?= e((string)array_sum(array_map(fn($r)=>(int)$r['assigned_stock'], $rows))) ?></span>
+            <div class="flex justify-between text-slate-500"><span>Total Qty</span><span><?= e((string)array_sum(array_map(fn($r)=>(int)$r['assigned_stock'], $rows))) ?></span></div>
+            <div class="flex justify-between text-slate-500"><span>Gross Total</span><span><?= e(money($doTotalGross)) ?></span></div>
+            <div class="flex justify-between text-slate-500"><span>Total Commission</span><span><?= e(money($doTotalComm)) ?></span></div>
+            <div class="flex justify-between text-lg font-bold text-slate-800 border-t-2 border-slate-200 pt-3 mt-2">
+                <span>Total with Commission</span><span><?= e(money($doTotalWithComm)) ?></span>
             </div>
         </div>
     </div>
@@ -269,7 +295,7 @@ if ($type === 'consignment_sale') {
 if ($type === 'issue_inv') {
     if ($no === '') { http_response_code(404); exit('Invoice number not found.'); }
     $rows = db_all($pdo,
-        'SELECT ca.id, ca.delivery_no, ca.assigned_stock, ca.sale_price, ca.commission_rate,
+        'SELECT ca.id, ca.delivery_no, ca.assigned_stock, ca.sale_price, ca.discount_amount, ca.commission_rate,
                 ca.notes, ca.issued_by, ca.updated_at,
                 c.store_name, c.branch_location,
                 mi.item_name, mi.item_code, mi.reference_code,
@@ -315,22 +341,26 @@ if ($type === 'issue_inv') {
                 <th class="text-slate-500 font-semibold text-xs uppercase">Code</th>
                 <th class="text-right text-slate-500 font-semibold text-xs uppercase">Qty</th>
                 <th class="text-right text-slate-500 font-semibold text-xs uppercase">Unit Price</th>
+                <th class="text-right text-slate-500 font-semibold text-xs uppercase">Discount</th>
+                <th class="text-right text-slate-500 font-semibold text-xs uppercase">Net Price</th>
                 <th class="text-right text-slate-500 font-semibold text-xs uppercase">Gross</th>
                 <th class="text-right text-slate-500 font-semibold text-xs uppercase">Comm%</th>
                 <th class="text-right text-slate-500 font-semibold text-xs uppercase">Commission</th>
-                <th class="text-right text-slate-500 font-semibold text-xs uppercase">Payout</th>
+                <th class="text-right text-slate-500 font-semibold text-xs uppercase">Total+Comm</th>
             </tr>
         </thead>
         <tbody>
         <?php
-            $totalGross = 0; $totalComm = 0; $totalPayout = 0;
+            $totalGross = 0; $totalComm = 0; $totalWithComm = 0;
             foreach ($rows as $row):
-                $gross   = (float)$row['assigned_stock'] * (float)$row['sale_price'];
+                $discount = (float)($row['discount_amount'] ?? 0);
+                $netPrice = (float)$row['sale_price'] - $discount;
+                $gross   = (float)$row['assigned_stock'] * $netPrice;
                 $comm    = round($gross * (float)$row['commission_rate'] / 100, 2);
-                $payout  = round($gross - $comm, 2);
+                $withComm = $gross + $comm;
                 $totalGross  += $gross;
                 $totalComm   += $comm;
-                $totalPayout += $payout;
+                $totalWithComm += $withComm;
         ?>
         <tr class="border-b border-slate-100">
             <td class="py-3 text-slate-800"><?= e($row['item_name']) ?></td>
@@ -338,10 +368,12 @@ if ($type === 'issue_inv') {
             <td class="text-slate-500"><?= e($row['item_code']) ?></td>
             <td class="text-right text-slate-600"><?= e((string)(int)$row['assigned_stock']) ?></td>
             <td class="text-right text-slate-600"><?= e(money($row['sale_price'])) ?></td>
+            <td class="text-right text-red-600"><?= e(money($discount)) ?></td>
+            <td class="text-right text-slate-600"><?= e(money($netPrice)) ?></td>
             <td class="text-right text-slate-600"><?= e(money($gross)) ?></td>
             <td class="text-right text-slate-500"><?= e((string)$row['commission_rate']) ?>%</td>
             <td class="text-right text-slate-600"><?= e(money($comm)) ?></td>
-            <td class="text-right font-medium text-slate-800"><?= e(money($payout)) ?></td>
+            <td class="text-right font-bold text-emerald-700"><?= e(money($withComm)) ?></td>
         </tr>
         <?php endforeach; ?>
         </tbody>
@@ -361,7 +393,7 @@ if ($type === 'issue_inv') {
             <div class="flex justify-between text-slate-500"><span>Gross Sales</span><span><?= e(money($totalGross)) ?></span></div>
             <div class="flex justify-between text-slate-500"><span>Commission</span><span><?= e(money($totalComm)) ?></span></div>
             <div class="flex justify-between text-lg font-bold text-slate-800 border-t-2 border-slate-200 pt-3 mt-2">
-                <span>Payout Due</span><span><?= e(money($totalPayout)) ?></span>
+                <span>Total with Commission</span><span><?= e(money($totalWithComm)) ?></span>
             </div>
         </div>
     </div>
